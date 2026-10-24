@@ -46,13 +46,9 @@ TimeoutStopSec=20
 Restart=on-failure
 RestartSec=5
 SyslogIdentifier=tautulli
-# Program and data are the only places Tautulli writes to; the program
-# directory stays writable for the built-in updater.
+# No ProtectSystem/ReadWritePaths: the built-in updater unpacks into /config/update
+# and renames the files into /opt/Tautulli, which fails across separate bind mounts.
 NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-ReadWritePaths=/opt/Tautulli /config
 
 [Install]
 WantedBy=multi-user.target
