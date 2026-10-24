@@ -260,6 +260,7 @@ def main():
 
     # Read config and start logging
     plexpy.initialize(config_file)
+    __import__('fork_addons').install()
 
     # Start the background threads
     plexpy.start()

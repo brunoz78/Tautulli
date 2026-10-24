@@ -1,0 +1,165 @@
+# Weekly: merge the latest release of Tautulli/Tautulli, translate new UI strings, publish a release.
+# Fork addition; the workflows of the original project are disabled in this fork.
+#
+# The built-in updater of Tautulli follows the head of the master branch, so master
+# only moves forward here: on a new release of the original or on a fork change.
+name: Fork sync and release
+
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # Monday 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: "Publish a release even without changes"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/Tautulli/Tautulli.git
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          # A token with workflow scope is only needed when upstream changes its workflows.
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only official releases of the original are merged, never its development branches.
+          TAG=$(gh api repos/Tautulli/Tautulli/releases/latest -q .tag_name)
+          echo "Latest release of the original: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          git remote add upstream "$UPSTREAM"
+          git fetch --quiet --no-tags upstream "refs/tags/$TAG:refs/tags/upstream-$TAG"
+          REF="upstream-$TAG"
+          BEHIND=$(git rev-list --count HEAD.."$REF")
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" = "0" ]; then echo "Up to date with $TAG"; exit 0; fi
+          if ! git merge --no-edit -m "Original $TAG eingespielt ($BEHIND Commits)" "$REF"; then
+            FILES=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
+            git merge --abort
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Abgleich mit dem Original: Merge-Konflikt" \
+              --body "Der wöchentliche Abgleich mit Tautulli/Tautulli $TAG ($BEHIND neue Commits) ist an Konflikten gescheitert:
+
+          $FILES
+
+          Bitte von Hand zusammenführen." || true
+            exit 1
+          fi
+
+      - name: Translate new UI strings
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          MISSING=$(python tools/i18n/extract.py --missing de 2>&1 >/dev/null | grep -o '^[0-9]*')
+          echo "Missing translations: $MISSING"
+          if [ "$MISSING" != "0" ]; then
+            if [ -n "$ANTHROPIC_API_KEY" ]; then
+              pip install --quiet anthropic
+              python tools/i18n/translate.py de
+            else
+              python tools/i18n/extract.py --missing de > missing.txt 2>/dev/null
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" \
+                --body "Ohne ANTHROPIC_API_KEY konnten diese Texte nicht automatisch übersetzt werden:
+
+          \`\`\`
+          $(head -c 60000 missing.txt)
+          \`\`\`" || true
+            fi
+          fi
+          python tools/i18n/extract.py
+          git add data/interfaces/default/js/i18n tools/i18n
+          git diff --cached --quiet || git commit -q -m "Übersetzung: neue Texte ergänzt"
+
+      - name: Smoke test
+        run: |
+          mkdir -p /tmp/tautulli
+          python Tautulli.py --datadir /tmp/tautulli --nolaunch --port 8181 --quiet &
+          for i in $(seq 1 30); do
+            curl -fsS -o /tmp/page.html -H 'Accept-Language: de' http://127.0.0.1:8181/welcome && break
+            sleep 2
+          done
+          grep -q 'js/i18n/i18n.js' /tmp/page.html
+          grep -q 'js/i18n/de.js' /tmp/page.html
+          curl -fsS -o /dev/null http://127.0.0.1:8181/js/i18n/de.js
+          grep -q 'brunoz78/Tautulli' /tmp/tautulli/logs/tautulli.log
+          echo "smoke test ok"
+          kill %1 || true
+
+      - name: Push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git push origin HEAD:master 2> push.err; then
+            cat push.err
+            if grep -q "workflows. permission" push.err; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "Abgleich mit dem Original: Secret SYNC_TOKEN fehlt" \
+                --body "Das Original hat eine Workflow-Datei geändert. Das Standard-Token darf solche Änderungen nicht pushen.
+
+          Abhilfe: ein Token mit den Rechten *Contents* und *Workflows* für dieses Repo als Secret \`SYNC_TOKEN\` hinterlegen und den Workflow erneut starten." || true
+            fi
+            exit 1
+          fi
+
+      - name: Decide on a release
+        id: decide
+        run: |
+          LAST=$(git describe --tags --abbrev=0 --match 'v*.post*' 2>/dev/null || echo "")
+          if [ -z "$LAST" ] || [ -n "$(git log --oneline "$LAST"..HEAD)" ] || [ "${{ inputs.force_release }}" = "true" ]; then
+            echo "release=yes" >> "$GITHUB_OUTPUT"
+          fi
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.decide.outputs.release == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST: ${{ steps.decide.outputs.last }}
+          UPTAG: ${{ steps.merge.outputs.tag }}
+        run: |
+          TAG="${UPTAG}.post$(date -u +%Y%m%d%H%M)"
+          SINCE=${LAST:+^$LAST}
+          {
+            echo "Stand: Original Tautulli/Tautulli $UPTAG mit deutscher Oberfläche."
+            echo
+            echo "**Aktualisieren:** In Tautulli unter Einstellungen → «Nach Updates suchen», oder \`update\` in der Konsole des Containers."
+            if [ -n "$LAST" ]; then
+              echo
+              echo "### Neu im Original (bis $UPTAG)"
+              git log --no-merges --format='- %s ([%h](https://github.com/Tautulli/Tautulli/commit/%H))' "upstream-$UPTAG" $SINCE | head -80
+            fi
+            echo
+            echo "### Neu im Fork"
+            git log --no-merges --format='- %s' HEAD $SINCE ^"upstream-$UPTAG" | head -40
+          } > notes.md
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target master --title "Tautulli $TAG" --notes-file notes.md

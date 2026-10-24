@@ -1,0 +1,48 @@
+{
+  "name": "Tautulli",
+  "slug": "tautulli",
+  "categories": [
+    13
+  ],
+  "date_created": "2026-10-24",
+  "type": "ct",
+  "updateable": true,
+  "privileged": false,
+  "interface_port": 8181,
+  "documentation": "https://github.com/brunoz78/Tautulli/blob/master/proxmox/README.md",
+  "website": "https://github.com/brunoz78/Tautulli",
+  "repository": "https://github.com/brunoz78/Tautulli",
+  "platforms": [
+    "pve"
+  ],
+  "logo": "https://raw.githubusercontent.com/brunoz78/Tautulli/master/data/interfaces/default/images/logo-circle.png",
+  "description": "Monitoring and statistics for Plex Media Server. This build adds a German web interface (switchable under Settings > General) and takes its updates from this fork.",
+  "install_methods": [
+    {
+      "type": "default",
+      "script": "ct/tautulli.sh",
+      "config_path": "/config/config.ini",
+      "resources": {
+        "cpu": 1,
+        "ram": 1024,
+        "hdd": 6,
+        "os": "Debian",
+        "version": "13"
+      }
+    }
+  ],
+  "default_credentials": {
+    "username": null,
+    "password": null
+  },
+  "notes": [
+    {
+      "text": "Data (config.ini, tautulli.db, logs, backups) is stored in /config, the same layout as the linuxserver/tautulli Docker image, so its volume can be copied over 1:1.",
+      "type": "info"
+    },
+    {
+      "text": "Update in the web interface (Settings > Check for Updates) or with `update` in the container console.",
+      "type": "info"
+    }
+  ]
+}
