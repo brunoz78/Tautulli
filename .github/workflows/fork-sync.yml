@@ -66,6 +66,7 @@ jobs:
             FILES=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
             git merge --abort
             gh issue create --repo "$GITHUB_REPOSITORY" --title "Abgleich mit dem Original: Merge-Konflikt" \
+              --assignee "${{ github.repository_owner }}" \
               --body "Der wöchentliche Abgleich mit Tautulli/Tautulli $TAG ($BEHIND neue Commits) ist an Konflikten gescheitert:
 
           $FILES
@@ -86,13 +87,26 @@ jobs:
               pip install --quiet anthropic
               python tools/i18n/translate.py de
             else
+              # Without an API key the strings are translated by hand. The issue is assigned
+              # to the owner so GitHub sends a mail; an open issue is updated, not duplicated.
               python tools/i18n/extract.py --missing de > missing.txt 2>/dev/null
-              gh issue create --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" \
-                --body "Ohne ANTHROPIC_API_KEY konnten diese Texte nicht automatisch übersetzt werden:
-
-          \`\`\`
-          $(head -c 60000 missing.txt)
-          \`\`\`" || true
+              {
+                echo "Der Abgleich mit Tautulli/Tautulli ${{ steps.merge.outputs.tag }} hat $MISSING neue Texte gebracht, die noch nicht übersetzt sind. Sie erscheinen in der Oberfläche auf Englisch, bis sie in \`js/i18n/de.js\` ergänzt sind."
+                echo
+                echo "Erledigen: in einer Claude-Sitzung «Tautulli übersetzen» sagen, oder \`python tools/i18n/translate.py de\` mit ANTHROPIC_API_KEY."
+                echo
+                echo '```'
+                head -c 60000 missing.txt
+                echo '```'
+              } > issue.md
+              OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Übersetzung in:title" --json number -q '.[0].number')
+              if [ -n "$OPEN" ]; then
+                gh issue edit "$OPEN" --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" --body-file issue.md || true
+                gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Neuer Stand nach dem Abgleich: $MISSING Texte offen." || true
+              else
+                gh issue create --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" \
+                  --assignee "${{ github.repository_owner }}" --body-file issue.md || true
+              fi
             fi
           fi
           python tools/i18n/extract.py
