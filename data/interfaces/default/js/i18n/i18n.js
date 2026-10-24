@@ -15,7 +15,7 @@
     "[data-no-i18n]", "[translate='no']", ".ace_editor", "#log-modal-content", "#tautulli_log_table td",
     "#tautulli_api_log_table td", "#plex_websocket_log_table td", "#plex_log_table td",
     ".highcharts-credits", ".dashboard-activity-metadata-title", ".dashboard-activity-metadata-subtitle",
-    ".dashboard-recent-media-metacontainer h3", ".dashboard-stats-info-title .sub-value",
+    ".dashboard-recent-media-metacontainer h3:not(.text-muted)",".dashboard-stats-info-title .sub-value",
     ".dashboard-stats-info-item .sub-value", ".item-children-instance-text-wrapper h3",
     ".summary-content-title", ".summary-content-summary", ".summary-poster-face-container",
   ].join(",");
@@ -105,6 +105,11 @@
         });
         break;
       }
+    }
+    if (out == null && depth < 2 && /^\(.+\)$/.test(key)) {
+      // "(Music library agent must be Last.fm)": the text without its parentheses is known
+      const t = translate(key.slice(1, -1), depth + 1);
+      if (t != null) out = "(" + t + ")";
     }
     if (out == null && depth < 2 && / [-·•|–]$/.test(key)) {
       // a separator left at the end, e.g. "Tautulli - Settings |" without a server name

@@ -20,6 +20,7 @@ import html
 import json
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -40,6 +41,8 @@ SKIP_TEMPLATES = {"newsletter_preview.html"}
 PY_KEYS = {"label", "description", "message", "stat_title", "category", "placeholder", "help_text",
            "select_all_label"}
 PY_KEYS_PER_FILE = {"graphs.py": {"name"}, "common.py": {"example"}}
+# files whose `title = '...'` assignments are shown in the web interface
+PY_TITLE_FILES = {"datafactory.py"}
 # (name, kind) tuples of the scheduler list in common.py
 PY_SCHEDULER_KINDS = {"scheduled", "websocket"}
 
@@ -153,6 +156,9 @@ def scan_js_source(src: str, found: set[str]) -> None:
         if _CONCAT_HEAD.search(src[max(0, g[0][0] - 60):g[0][0]]):
             joined = PH + joined
         if _CONCAT_TAIL.match(src[g[-1][1]:g[-1][1] + 80]):
+            joined += PH
+        elif re.match(r"\s*\+", src[g[-1][1]:g[-1][1] + 10]) and not joined.endswith(PH):
+            # "Added " + moment(...).fromNow(): any expression may follow
             joined += PH
         if len(g) > 1 or joined != parts[0]:
             _add_js(joined, found)
@@ -277,8 +283,23 @@ def strip_mako(src: str) -> str:
     return "".join(out)
 
 
+def scan_mako_code(src: str, found: set[str]) -> None:
+    """Capitalised strings in <% ... %> blocks, e.g. headers = {'movie': ('Movie Libraries', ...)}."""
+    for block in re.findall(r"(?s)<%!?(?![a-z/])(.*?)%>", src):
+        try:
+            tree = ast.parse(textwrap.dedent(block))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    and re.match(r"[A-Z][a-z]", node.value) and not node.value.startswith(("fa-", "http"))):
+                _add_py(node.value, found)
+
+
 def scan_template(path: Path, found: set[str]) -> None:
-    src = strip_mako(path.read_text(encoding="utf-8", errors="replace"))
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    scan_mako_code(raw, found)
+    src = strip_mako(raw)
     for script in re.findall(r"(?s)<script\b[^>]*>(.*?)</script>", src):
         scan_js_source(script, found)
     src = re.sub(r"(?s)<script\b.*?</script>|<style\b.*?</style>", "", src)
@@ -323,6 +344,10 @@ def scan_py(path: Path, found: set[str]) -> None:
                 and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts)
                 and node.elts[1].value in PY_SCHEDULER_KINDS):
             _add_py(node.elts[0].value, found)
+        if (path.name in PY_TITLE_FILES and isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "title" for t in node.targets)):
+            # home stats cards: title = 'Concurrent Transcodes'
+            _add_py(_py_text(node.value), found)
         if isinstance(node, ast.Dict):
             for k, v in zip(node.keys, node.values):
                 if isinstance(k, ast.Constant) and k.value in keys:
