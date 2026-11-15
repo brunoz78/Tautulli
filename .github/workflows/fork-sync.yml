@@ -118,7 +118,8 @@ jobs:
           mkdir -p /tmp/tautulli
           python Tautulli.py --datadir /tmp/tautulli --nolaunch --port 8181 --quiet &
           for i in $(seq 1 30); do
-            curl -fsS -o /tmp/page.html -H 'Accept-Language: de' http://127.0.0.1:8181/welcome && break
+            # -L: since v2.19 a fresh install sets a password and redirects to the login page
+            curl -fsSL -o /tmp/page.html -H 'Accept-Language: de' http://127.0.0.1:8181/welcome && break
             sleep 2
           done
           grep -q 'js/i18n/i18n.js' /tmp/page.html
