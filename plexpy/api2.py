@@ -154,7 +154,7 @@ class API2(object):
                 self._api_kwargs = kwargs
 
         if self._api_msg:
-            logger.api_debug('Tautulli APIv2 :: %s.' % self._api_msg)
+            logger.api_warn('Tautulli APIv2 :: %r.' % self._api_msg)
 
         logger.api_debug('Tautulli APIv2 :: Cleaned kwargs: %s' % self._api_kwargs)
 
@@ -381,7 +381,7 @@ class API2(object):
         return data
 
     def register_device(self, device_id='', device_name='', platform=None, version=None,
-                        friendly_name='', onesignal_id=None, push_token=None, min_version='', **kwargs):
+                        friendly_name='', push_token=None, min_version='', **kwargs):
         """ Registers the Tautulli Remote App.
 
             ```
@@ -393,7 +393,6 @@ class API2(object):
                 platform (str):           The platform of the mobile devices
                 version (str):            The version of the app
                 friendly_name (str):      A friendly name to identify the mobile device
-                onesignal_id (str):       The OneSignal id for the mobile device
                 push_token (str):         The push notification token for the mobile device
                 min_version (str):        The minimum Tautulli version supported by the mobile device, e.g. v2.5.6
 
@@ -439,19 +438,12 @@ class API2(object):
             self._api_result_type = 'error'
             return
 
-        ## TODO: Temporary for backwards compatibility, assume device_id is onesignal_id
-        # App versions that register a push token always send onesignal_id explicitly,
-        # so this only applies to older apps that predate both.
-        if device_id and onesignal_id is None and push_token is None:
-            onesignal_id = device_id
-
         result = mobile_app.add_mobile_device(device_id=device_id,
                                               device_name=device_name,
                                               device_token=self._api_apikey,
                                               platform=platform,
                                               version=version,
                                               friendly_name=friendly_name,
-                                              onesignal_id=onesignal_id,
                                               push_token=push_token)
 
         if result:
@@ -689,7 +681,7 @@ General optional parameters:
             try:
                 out = xmltodict.unparse(out, pretty=True)
             except Exception as e:
-                logger.api_error('Tautulli APIv2 :: Failed to parse xml result')
+                logger.api_exception('Tautulli APIv2 :: Failed to parse xml result')
                 self._api_response_code = 500
                 try:
                     out['message'] = e
@@ -697,7 +689,7 @@ General optional parameters:
                     out = xmltodict.unparse(out, pretty=True)
 
                 except Exception as e:
-                    logger.api_error('Tautulli APIv2 :: Failed to parse xml result error message %s' % e)
+                    logger.api_exception('Tautulli APIv2 :: Failed to parse xml result error message %s' % e)
                     out = '''<?xml version="1.0" encoding="utf-8"?>
                                 <response>
                                     <message>%s</message>
@@ -715,6 +707,7 @@ General optional parameters:
         if kwargs.get('cmd') == 'register_device':
             if kwargs.get('device_id'):
                 logger._BLACKLIST_WORDS.add(kwargs['device_id'])
+            # Old app versions still send their OneSignal id.
             if kwargs.get('onesignal_id'):
                 logger._BLACKLIST_WORDS.add(kwargs['onesignal_id'])
             if kwargs.get('push_token'):
@@ -739,7 +732,7 @@ General optional parameters:
 
                 result = call(**self._api_kwargs)
             except Exception as e:
-                logger.api_error('Tautulli APIv2 :: Failed to run %s with %s: %s' % (self._api_cmd, self._api_kwargs, e))
+                logger.api_exception('Tautulli APIv2 :: Failed to run %s with %s: %s' % (self._api_cmd, self._api_kwargs, e))
                 self._api_response_code = 500
                 if self._api_debug:
                     cherrypy.request.show_tracebacks = True

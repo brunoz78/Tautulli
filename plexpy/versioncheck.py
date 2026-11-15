@@ -33,7 +33,7 @@ from plexpy import request
 def runGit(args):
 
     if plexpy.CONFIG.GIT_PATH:
-        git_locations = ['"' + plexpy.CONFIG.GIT_PATH + '"']
+        git_locations = [plexpy.CONFIG.GIT_PATH]
     else:
         git_locations = ['git']
 
@@ -41,31 +41,48 @@ def runGit(args):
         git_locations.append('/usr/local/git/bin/git')
 
     output = err = None
+    git_args = helpers.split_args(args)
 
     for cur_git in git_locations:
-        cmd = cur_git + ' ' + args
+        cmd = [cur_git] + git_args
 
         try:
-            logger.debug('Trying to execute: "' + cmd + '" in ' + plexpy.PROG_DIR)
-            p = subprocess.Popen(helpers.split_args(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=plexpy.PROG_DIR)
+            logger.debug('Trying to execute: "' + ' '.join(cmd) + '" in ' + plexpy.PROG_DIR)
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=plexpy.PROG_DIR)
             output, err = p.communicate()
             output = output.strip().decode()
 
             logger.debug('Git output: ' + output)
         except OSError:
-            logger.debug('Command failed: %s', cmd)
+            logger.warn('Command failed: %s', cmd)
             continue
 
         if 'not found' in output or "not recognized as an internal or external command" in output:
-            logger.debug('Unable to find git with command ' + cmd)
+            logger.warn('Unable to find git with command: %s', cmd)
             output = None
         elif 'fatal:' in output or err:
-            logger.error('Git returned bad info. Are you sure this is a git installation?')
+            logger.error('Git returned bad info. Are you sure this is a git installation? %s', err or output)
             output = None
         elif output:
             break
 
     return output, err
+
+
+GIT_NAME_RE = re.compile(r'\w[\w./@+-]*')
+
+
+def valid_git_refs():
+    """Return True if GIT_REMOTE and GIT_BRANCH are safe to pass to git as single arguments."""
+    remote, branch = plexpy.CONFIG.GIT_REMOTE, plexpy.CONFIG.GIT_BRANCH
+    if not GIT_NAME_RE.fullmatch(remote or '') or not GIT_NAME_RE.fullmatch(branch or ''):
+        logger.error('Invalid git remote or branch name, skipping git command.')
+        return False
+    output, err = runGit('remote')
+    if remote not in (output or '').split():
+        logger.error('Git remote "%s" does not exist, skipping git command.', remote)
+        return False
+    return True
 
 
 def get_version():
@@ -127,6 +144,8 @@ def get_version():
             plexpy.INSTALL_TYPE = 'docker'
         elif plexpy.SNAP:
             plexpy.INSTALL_TYPE = 'snap'
+        elif plexpy.FLATPAK:
+            plexpy.INSTALL_TYPE = 'flatpak'
         else:
             plexpy.INSTALL_TYPE = 'source'
 
@@ -159,11 +178,11 @@ def check_update(scheduler=False, notify=False, use_cache=False):
     if not plexpy.CURRENT_VERSION:
         plexpy.UPDATE_AVAILABLE = None
     elif plexpy.COMMITS_BEHIND > 0 and \
-            (plexpy.common.BRANCH in ('master', 'beta') or plexpy.SNAP or plexpy.FROZEN) and \
+            (plexpy.common.BRANCH in ('master', 'beta') or plexpy.SNAP or plexpy.FLATPAK or plexpy.FROZEN) and \
             plexpy.common.RELEASE != plexpy.LATEST_RELEASE:
         plexpy.UPDATE_AVAILABLE = 'release'
     elif plexpy.COMMITS_BEHIND > 0 and \
-            not plexpy.SNAP and not plexpy.FROZEN and \
+            not plexpy.SNAP and not plexpy.FLATPAK and not plexpy.FROZEN and \
             plexpy.CURRENT_VERSION != plexpy.LATEST_VERSION:
         plexpy.UPDATE_AVAILABLE = 'commit'
     else:
@@ -230,14 +249,14 @@ def check_github(scheduler=False, notify=False, use_cache=False):
         ahead_by = int(commits['ahead_by'])
         logger.debug("In total, %d commits behind", ahead_by)
 
-        # Do not count [skip ci] commits for Docker or Snap on the nightly branch
-        if (plexpy.DOCKER or plexpy.SNAP) and plexpy.CONFIG.GIT_BRANCH == 'nightly':
+        # Do not count [skip ci] commits for Docker, Snap or Flatpak on the nightly branch
+        if (plexpy.DOCKER or plexpy.SNAP or plexpy.FLATPAK) and plexpy.CONFIG.GIT_BRANCH == 'nightly':
             for commit in reversed(commits['commits']):
                 if '[skip ci]' not in commit['commit']['message']:
                     plexpy.LATEST_VERSION = commit['sha']
                     break
                 ahead_by -= 1
-            install = 'Docker container' if plexpy.DOCKER else 'Snap package'
+            install = 'Docker container' if plexpy.DOCKER else 'Snap package' if plexpy.SNAP else 'Flatpak'
             logger.debug("%s %d commits behind", install, ahead_by)
 
         plexpy.COMMITS_BEHIND = ahead_by
@@ -282,7 +301,7 @@ def check_github(scheduler=False, notify=False, use_cache=False):
                                      'plexpy_update_behind': plexpy.COMMITS_BEHIND})
 
         if scheduler and plexpy.CONFIG.PLEXPY_AUTO_UPDATE and \
-                not plexpy.DOCKER and not plexpy.SNAP and not plexpy.FROZEN:
+                not plexpy.DOCKER and not plexpy.SNAP and not plexpy.FLATPAK and not plexpy.FROZEN:
             logger.info('Running automatic update.')
             plexpy.shutdown(restart=True, update=True)
 
@@ -293,10 +312,14 @@ def check_github(scheduler=False, notify=False, use_cache=False):
 
 
 def update():
-    if plexpy.INSTALL_TYPE in ('docker', 'snap', 'windows', 'macos'):
+    if plexpy.INSTALL_TYPE in ('docker', 'snap', 'flatpak', 'windows', 'macos'):
+        logger.info('Tautulli cannot update itself for install type %s', plexpy.INSTALL_TYPE)
         return
 
     elif plexpy.INSTALL_TYPE == 'git':
+        if not valid_git_refs():
+            return
+
         output, err = runGit('pull --ff-only {} {}'.format(plexpy.CONFIG.GIT_REMOTE,
                                                            plexpy.CONFIG.GIT_BRANCH))
 
@@ -314,6 +337,7 @@ def update():
 
         _, _ = runGit('clean -fd')
         clean_pyc()
+        logger.info('Update downloaded from git')
 
     elif plexpy.INSTALL_TYPE == 'source':
         tar_download_url = 'https://github.com/{}/{}/tarball/{}'.format(plexpy.CONFIG.GIT_USER,
@@ -329,7 +353,7 @@ def update():
             logger.error("Unable to retrieve new version from '%s', can't update", tar_download_url)
             return
 
-        download_name = plexpy.CONFIG.GIT_BRANCH + '-github'
+        download_name = plexpy.CONFIG.GIT_BRANCH.replace('/', '_') + '-github'
         tar_download_path = os.path.join(plexpy.DATA_DIR, download_name)
 
         # Save tar to disk
@@ -338,12 +362,15 @@ def update():
 
         # Extract the tar to update folder
         logger.info('Extracting file: ' + tar_download_path)
-        tar = tarfile.open(tar_download_path)
+        tar = None
+        shutil.rmtree(update_dir, ignore_errors=True)
         try:
+            tar = tarfile.open(tar_download_path)
             safe_extract(tar, update_dir)
-        except ValueError as e:
+        except (ValueError, tarfile.TarError, OSError, EOFError) as e:
             logger.error('Invalid update archive: %s', e)
-            tar.close()
+            if tar:
+                tar.close()
             os.remove(tar_download_path)
             return
         else:
@@ -383,10 +410,18 @@ def update():
             return
 
         clean_pyc()
+        logger.info('Update extracted from the downloaded archive')
 
 
 def reset_git_install():
     if plexpy.INSTALL_TYPE == 'git':
+        if not valid_git_refs():
+            return False
+
+        if not all(GIT_NAME_RE.fullmatch(v or '') for v in (plexpy.CONFIG.GIT_USER, plexpy.CONFIG.GIT_REPO)):
+            logger.error('Invalid git user or repo name, skipping git command.')
+            return False
+
         logger.info('Attempting to reset git install to "{}/{}/{}"'.format(plexpy.CONFIG.GIT_REMOTE,
                                                                            plexpy.CONFIG.GIT_BRANCH,
                                                                            common.RELEASE))
@@ -413,9 +448,14 @@ def reset_git_install():
                 logger.error('Unable to reset Tautulli installation: ' + line)
                 return False
 
+        logger.info('Tautulli installation reset.')
+
 
 def checkout_git_branch():
     if plexpy.INSTALL_TYPE == 'git':
+        if not valid_git_refs():
+            return
+
         logger.info('Attempting to checkout git branch "{}/{}"'.format(plexpy.CONFIG.GIT_REMOTE,
                                                                        plexpy.CONFIG.GIT_BRANCH))
 
@@ -433,6 +473,9 @@ def checkout_git_branch():
 
         output, err = runGit('pull {} {}'.format(plexpy.CONFIG.GIT_REMOTE,
                                                  plexpy.CONFIG.GIT_BRANCH))
+        if output:
+            logger.info('Checked out git branch "{}/{}"'.format(plexpy.CONFIG.GIT_REMOTE,
+                                                               plexpy.CONFIG.GIT_BRANCH))
 
 
 def github_cache(cache, github_data=None, use_cache=True):
@@ -446,8 +489,8 @@ def github_cache(cache, github_data=None, use_cache=True):
         try:
             with open(cache_filepath, 'w', encoding='utf-8') as cache_file:
                 json.dump(cache_data, cache_file)
-        except:
-            pass
+        except Exception as e:
+            logger.debug('Unable to write GitHub %s cache: %s', cache, e, exc_info=True)
     else:
         if not use_cache:
             return
@@ -550,7 +593,7 @@ def clean_pyc():
                 try:
                     shutil.rmtree(dirpath)
                 except OSError as e:
-                    logger.error('Failed to remove directory %s: %s', dirpath, e)
+                    logger.warn('Failed to remove directory %s: %s', dirpath, e)
 
         for _file in files:
             if _file.lower().endswith('.pyc'):
@@ -558,15 +601,14 @@ def clean_pyc():
                 try:
                     os.remove(filepath)
                 except OSError as e:
-                    logger.error('Failed to remove file %s: %s', filepath, e)
+                    logger.warn('Failed to remove file %s: %s', filepath, e)
 
 
 def safe_extract(tar, path):
-    base_path = os.path.realpath(path)
+    if not hasattr(tarfile, 'data_filter'):
+        raise ValueError('Python 3.11.4 or later is required to extract updates. Update Python and try again.')
 
-    for member in tar.getmembers():
-        member_path = os.path.realpath(os.path.join(base_path, member.name))
-        if not helpers.is_subdir(member_path, base_path):
-            raise ValueError(f"Path traversal detected: {member.name}")
-
-    tar.extractall(path)
+    try:
+        tar.extractall(path, filter='data')
+    except tarfile.FilterError as e:
+        raise ValueError(str(e)) from e

@@ -226,7 +226,7 @@
                     <h3>Database Import</h3>
                     <div class="wizard-input-section">
                         <p class="help-block">
-                            If you have an existing Tautulli, PlexWatch, or Plexivity database, you can import the data into Tautulli.
+                            If you have an existing Tautulli database, you can import the data into Tautulli.
                         </p>
                         <p class="help-block">
                             To import a database, navigate to the <strong>Settings</strong> page
@@ -264,8 +264,8 @@
 <script src="${http_root}js/bootstrap-wizard.min.js"></script>
 <script>
     function validateAuthentication(el) {
-        var http_username = $("#http_username").val();
-        var http_password = $("#http_password").val();
+        var http_username = $.trim($("#http_username").val());
+        var http_password = $.trim($("#http_password").val());
         var valid_authentication = el.val();
         var retValue = {};
 
@@ -273,7 +273,7 @@
             retValue.status = false;
             retValue.msg = "Please enter a username and password.";
             $("#authentication-status").html('<i class="fa fa-exclamation-circle"></i> Please enter a username and password.');
-            $('#authentication-status').fadeIn('fast').delay(2000).fadeOut('fast');
+            $('#authentication-status').fadeIn('fast');
         } else {
             retValue.status = true;
         }
@@ -289,7 +289,7 @@
             retValue.status = false;
             retValue.msg = "Please verify your server.";
             $("#pms-verify-status").html('<i class="fa fa-exclamation-circle"></i> Please verify your server.');
-            $('#pms-verify-status').fadeIn('fast').delay(2000).fadeOut('fast');
+            $('#pms-verify-status').fadeIn('fast');
         } else {
             retValue.status = true;
         }
@@ -305,7 +305,7 @@
             retValue.status = false;
             retValue.msg = "Please authenticate.";
             $("#pms-token-status").html('<i class="fa fa-exclamation-circle"></i> Please authenticate.');
-            $('#pms-token-status').fadeIn('fast').delay(2000).fadeOut('fast');
+            $('#pms-token-status').fadeIn('fast');
         } else {
             retValue.status = true;
         }
@@ -321,7 +321,7 @@
             retValue.status = false;
             retValue.msg = "Please enter a valid integer.";
             $("#ignore-int-status").html('<i class="fa fa-exclamation-circle"></i> Please enter a valid ignore interval.');
-            $('#ignore-int-status').fadeIn('fast').delay(2000).fadeOut('fast');
+            $('#ignore-int-status').fadeIn('fast');
         } else {
             retValue.status = true;
         }
@@ -357,14 +357,28 @@ $(document).ready(function() {
     });
 
     wizard.on("submit", function(wizard) {
-        // Probably should not success before we know, but hopefully validation is good enough.
-        wizard.submitSuccess();
         $.ajax({
             type: "POST",
             url: wizard.args.submitUrl,
             data: wizard.serialize(),
             dataType: "json",
-            complete: function (data) {
+            complete: function (xhr) {
+                var data = xhr.responseJSON;
+                if (data && data.result === "error") {
+                    // Return to the authentication card with every typed value kept.
+                    wizard.submitFailure();
+                    wizard.setCard(1);
+                    wizard.enableNextButton();
+                    wizard.changeNextButton("Next", "btn-primary");
+                    wizard.updateProgressBar(100 / wizard._cards.length);
+                    wizard.backButton.show();
+                    $("#authentication-status").empty()
+                        .append('<i class="fa fa-exclamation-circle"></i> ', $("<span>").text(data.message));
+                    $('#authentication-status').fadeIn('fast');
+                    return;
+                }
+                // A dropped reply means the web server restarted, so the save worked.
+                wizard.submitSuccess();
                 $(".countdown").countdown(function () { location.reload(); }, 5, "");
             }
         })

@@ -15,10 +15,12 @@
 #  You should have received a copy of the GNU General Public License
 #  along with Tautulli.  If not, see <http://www.gnu.org/licenses/>.
 
+import functools
 import json
 import os
 import ssl
 import sys
+from ipaddress import ip_network
 from pathlib import Path
 
 import cheroot.errors
@@ -28,7 +30,7 @@ import cherrypy_cors
 import plexpy
 from plexpy import logger
 from plexpy import webauth
-from plexpy.helpers import create_https_certificates, hash_pms_uuid
+from plexpy.helpers import create_https_certificates, hash_pms_uuid, is_valid_ip
 from plexpy.webserve import WebInterface, BaseRedirect
 
 
@@ -60,7 +62,7 @@ def _patch_cheroot_makefile():
 
         makefile.BufferedWriter._flush_unlocked = _flush_unlocked_patched
     except Exception:
-        pass
+        logger.debug("Tautulli WebStart :: Unable to patch the cheroot socket writer.", exc_info=True)
 
 
 def _patch_cherrypy_cors_preflight():
@@ -208,6 +210,9 @@ def initialize(options):
             cherrypy.tools.auth = cherrypy.Tool('before_handler', webauth.check_auth, priority=2)
     else:
         logger.warn("Tautulli WebStart :: Web server authentication is disabled!")
+        if not plexpy.CONFIG.ALLOW_PUBLIC_NO_PASSWORD:
+            logger.warn("Tautulli WebStart :: Without a password, only loopback and local network "
+                        "clients can connect. Set allow_public_no_password = 1 in config.ini to change this.")
 
         plexpy.AUTH_ENABLED = False
         basic_auth_enabled = False
@@ -218,6 +223,7 @@ def initialize(options):
         plexpy.HTTP_ROOT = options['http_root'] = '/'
 
     cherrypy.tools.csrf = cherrypy.Tool('before_handler', webauth.check_csrf_token, priority=3)
+    cherrypy.tools.nopwgate = cherrypy.Tool('before_handler', no_password_gate, priority=0)
     cherrypy.tools.secheaders = cherrypy.Tool('before_finalize', set_security_headers)
 
     logger.info("Tautulli WebStart :: Thread Pool Size: %d.", plexpy.CONFIG.HTTP_THREAD_POOL)
@@ -245,6 +251,7 @@ def initialize(options):
             'tools.auth_basic.checkpassword': cherrypy.lib.auth_basic.checkpassword_dict({
                 options['http_username']: options['http_password']}),
             'tools.csrf.on': True,
+            'tools.nopwgate.on': not options['http_password'] and not plexpy.CONFIG.ALLOW_PUBLIC_NO_PASSWORD,
             'tools.secheaders.on': True,
             'error_page.default': error_page,
             'cors.expose.on': True,
@@ -254,80 +261,71 @@ def initialize(options):
             'tools.sessions.on': False,
         },
         '/status': {
+            'tools.nopwgate.on': False,
             'tools.auth_basic.on': False,
             'tools.sessions.on': True,
         },
         '/newsletter': {
+            'tools.nopwgate.on': False,
             'tools.auth_basic.on': False,
             'tools.sessions.on': True,
         },
         '/image': {
+            'tools.nopwgate.on': False,
             'tools.auth_basic.on': False,
             'tools.sessions.on': True,
         },
         '/interfaces': {
+            'tools.nopwgate.on': False,
             'tools.staticdir.on': True,
             'tools.staticdir.dir': "interfaces",
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
             'tools.auth.on': False,
         },
         '/images': {
+            'tools.nopwgate.on': False,
             'tools.staticdir.on': True,
             'tools.staticdir.dir': "interfaces/default/images",
             'tools.staticdir.content_types': {'svg': 'image/svg+xml'},
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
             'tools.auth.on': False,
         },
         '/css': {
+            'tools.nopwgate.on': False,
             'tools.staticdir.on': True,
             'tools.staticdir.dir': "interfaces/default/css",
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
             'tools.auth.on': False,
         },
         '/fonts': {
+            'tools.nopwgate.on': False,
             'tools.staticdir.on': True,
             'tools.staticdir.dir': "interfaces/default/fonts",
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
             'tools.auth.on': False,
         },
         '/js': {
+            'tools.nopwgate.on': False,
             'tools.staticdir.on': True,
             'tools.staticdir.dir': "interfaces/default/js",
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
             'tools.auth.on': False,
         },
         '/favicon.ico': {
+            'tools.nopwgate.on': False,
             'tools.staticfile.on': True,
             'tools.staticfile.filename': os.path.abspath(os.path.join(
                 plexpy.PROG_DIR, 'data/interfaces/default/images/favicon/favicon.ico')),
-            'tools.caching.on': True,
-            'tools.caching.force': True,
-            'tools.caching.delay': 0,
             'tools.expires.on': True,
             'tools.expires.secs': 60 * 60 * 24 * 30,  # 30 days
             'tools.sessions.on': False,
@@ -381,6 +379,66 @@ def proxy():
 
     # Call original cherrypy proxy tool with the new local
     cherrypy.lib.cptools.proxy(local=local)
+
+
+_FORWARD_HEADERS = ('X-Forwarded-For', 'Forwarded', 'X-Real-IP', 'Via')
+_LOCAL_NETWORKS = [ip_network(n) for n in (
+    '127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10',
+    '169.254.0.0/16', '::1/128', 'fc00::/7', 'fe80::/10')]
+
+
+def _parse_ip(address):
+    ip = is_valid_ip(str(address).split('%')[0].strip())
+    if ip is False:
+        return None
+    return ip.ipv4_mapped or ip if ip.version == 6 else ip
+
+
+def _is_local(ip):
+    return ip is not None and any(ip in net for net in _LOCAL_NETWORKS)
+
+
+@functools.lru_cache(maxsize=1000)
+def _log_refused(client, reason):
+    logger.warn("Tautulli WebStart :: Refused %s. No password is set. %s", client, reason)
+
+
+def no_password_gate():
+    """Refuse clients outside the local network while no password is set."""
+    request = cherrypy.request
+    # The proxy tool overwrites remote.ip, so read the real peer from WSGI.
+    peer = _parse_ip(request.wsgi_environ.get('REMOTE_ADDR'))
+    client = peer
+    reason = None
+
+    if _is_local(peer):
+        xff = request.headers.get('X-Forwarded-For')
+        if plexpy.CONFIG.HTTP_PROXY and xff:
+            # The client controls the leftmost entry. The trusted proxy adds the rightmost.
+            client = _parse_ip(xff.split(',')[-1])
+        elif any(request.headers.get(h) for h in _FORWARD_HEADERS):
+            reason = ("The reverse proxy must send X-Forwarded-For." if plexpy.CONFIG.HTTP_PROXY else
+                      "A reverse proxy forwarded this request, and Enable HTTP Proxy is off.")
+
+    if reason is None:
+        if _is_local(client):
+            return
+        if client is None:
+            reason = "Tautulli could not read the client address."
+        else:
+            reason = "The client address %s is not on the local network." % client
+            if client.version == 6:
+                reason += " Public IPv6 addresses count as remote."
+
+    _log_refused(str(client or peer), reason)
+
+    response = cherrypy.response
+    response.status = 403
+    response.headers['Content-Type'] = 'text/plain;charset=utf-8'
+    response.body = ("Tautulli refused this connection because no password is set and "
+                     "you are not on the local network.\n\n"
+                     "Connect to Tautulli from the local network to set a password in the Settings.\n").encode('utf-8')
+    request.handler = None
 
 
 def set_security_headers():

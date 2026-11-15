@@ -26,13 +26,14 @@ from plexpy import helpers
 from plexpy import logger
 
 
-_ONESIGNAL_APP_ID = '3b4b666a-d557-4b92-acdf-e2c8c4b95357'
-_ONESIGNAL_DISABLED = 'onesignal-disabled'
 _PUSH_DISABLED = 'push-disabled'
 
 _REVALIDATE_INTERVAL = 2  # seconds; the relay rate limits /v1/validate per client IP
 
 TEMP_DEVICE_TOKENS = {}
+
+_LAST_SEEN = {}
+_LAST_SEEN_THROTTLE = 60  # seconds between last_seen writes per device
 
 
 def relay_device_id(push_token):
@@ -97,8 +98,7 @@ def get_mobile_device_by_token(device_token=None):
 
 
 def add_mobile_device(device_id=None, device_name=None, device_token=None,
-                      platform=None, version=None, friendly_name=None, onesignal_id=None,
-                      push_token=None):
+                      platform=None, version=None, friendly_name=None, push_token=None):
     db = database.MonitorDatabase()
 
     keys = {'device_id': device_id}
@@ -106,7 +106,6 @@ def add_mobile_device(device_id=None, device_name=None, device_token=None,
               'device_token': device_token,
               'platform': platform,
               'version': version,
-              'onesignal_id': onesignal_id,
               'push_token': push_token}
 
     if friendly_name:
@@ -116,7 +115,7 @@ def add_mobile_device(device_id=None, device_name=None, device_token=None,
         result = db.upsert(table_name='mobile_devices', key_dict=keys, value_dict=values)
         blacklist_logger()
     except Exception as e:
-        logger.warn("Tautulli MobileApp :: Failed to register mobile device in the database: %s." % e)
+        logger.exception("Tautulli MobileApp :: Failed to register mobile device in the database: %s." % e)
         return
 
     if result == 'insert':
@@ -124,8 +123,11 @@ def add_mobile_device(device_id=None, device_name=None, device_token=None,
     else:
         logger.info("Tautulli MobileApp :: Re-registered mobile device '%s' in the database." % device_name)
 
+    # A (re-)registered device must get a fresh last_seen even if the
+    # same token wrote one within the throttle window
+    _LAST_SEEN.pop(device_token, None)
     set_last_seen(device_token=device_token)
-    threading.Thread(target=set_official, args=[device_id, onesignal_id, push_token]).start()
+    threading.Thread(target=set_official, args=[device_id, push_token]).start()
     return True
 
 
@@ -139,9 +141,6 @@ def get_mobile_device_config(mobile_device_id=None):
     db = database.MonitorDatabase()
     result = db.select_single("SELECT * FROM mobile_devices WHERE id = ?",
                               args=[mobile_device_id])
-
-    if result['onesignal_id'] == _ONESIGNAL_DISABLED:
-        result['onesignal_id'] = ''
 
     if result['push_token'] == _PUSH_DISABLED:
         result['push_token'] = ''
@@ -168,7 +167,7 @@ def set_mobile_device_config(mobile_device_id=None, **kwargs):
         blacklist_logger()
         return True
     except Exception as e:
-        logger.warn("Tautulli MobileApp :: Unable to update mobile device: %s." % e)
+        logger.exception("Tautulli MobileApp :: Unable to update mobile device: %s." % e)
         return False
 
 
@@ -176,25 +175,23 @@ def delete_mobile_device(mobile_device_id=None, device_id=None):
     db = database.MonitorDatabase()
 
     if mobile_device_id:
-        logger.debug("Tautulli MobileApp :: Deleting mobile_device_id %s from the database." % mobile_device_id)
+        logger.info("Tautulli MobileApp :: Deleting mobile_device_id %s from the database." % mobile_device_id)
         result = db.action("DELETE FROM mobile_devices WHERE id = ?", args=[mobile_device_id])
         return True
     elif device_id:
-        logger.debug("Tautulli MobileApp :: Deleting device_id %s from the database." % device_id)
+        logger.info("Tautulli MobileApp :: Deleting device_id %s from the database." % device_id)
         result = db.action("DELETE FROM mobile_devices WHERE device_id = ?", args=[device_id])
         return True
     else:
+        logger.warn("Tautulli MobileApp :: Unable to delete mobile device: no mobile_device_id or device_id provided.")
         return False
 
 
-def set_official(device_id, onesignal_id, push_token=None):
+def set_official(device_id, push_token=None):
     db = database.MonitorDatabase()
 
-    # Newer app versions register a push token; older ones only send a OneSignal ID.
-    if push_token:
-        official = validate_push_token(push_token=push_token)
-    else:
-        official = validate_onesignal_id(onesignal_id=onesignal_id)
+    # App versions before the relay register no push token and cannot receive notifications.
+    official = validate_push_token(push_token=push_token) if push_token else 0
 
     # An indeterminate result says nothing about the token, so don't let it
     # clear a device that has already validated.
@@ -208,7 +205,7 @@ def set_official(device_id, onesignal_id, push_token=None):
                            "%s" % where,
                            args=[official, device_id])
     except Exception as e:
-        logger.warn("Tautulli MobileApp :: Failed to set official flag: %s." % e)
+        logger.warn("Tautulli MobileApp :: Failed to set official flag: %s." % e, exc_info=True)
         return
 
 
@@ -223,38 +220,27 @@ def set_official_from_delivery(device, official):
                   args=[official, device['device_id']])
     except Exception as e:
         logger.warn("Tautulli MobileApp :: Failed to set official flag for device %s: %s."
-                    % (relay_device_id(device['push_token']), e))
+                    % (relay_device_id(device['push_token']), e), exc_info=True)
 
 
 def set_last_seen(device_token=None):
-    db = database.MonitorDatabase()
     last_seen = helpers.timestamp()
+
+    # Every authenticated mobile app API call updates last_seen; throttle
+    # the write so read-only polling doesn't contend with activity
+    # processing on every request
+    if last_seen - _LAST_SEEN.get(device_token, 0) < _LAST_SEEN_THROTTLE:
+        return
+    _LAST_SEEN[device_token] = last_seen
+
+    db = database.MonitorDatabase()
 
     try:
         result = db.action("UPDATE mobile_devices SET last_seen = ? WHERE device_token = ?",
                            args=[last_seen, device_token])
     except Exception as e:
-        logger.warn("Tautulli MobileApp :: Failed to set last_seen time for device: %s." % e)
+        logger.warn("Tautulli MobileApp :: Failed to set last_seen time for device: %s." % e, exc_info=True)
         return
-
-
-def validate_onesignal_id(onesignal_id):
-    if onesignal_id is None:
-        return 0
-    elif onesignal_id == _ONESIGNAL_DISABLED:
-        return 2
-
-    headers = {'Content-Type': 'application/json'}
-
-    logger.info("Tautulli MobileApp :: Validating OneSignal ID")
-    try:
-        r = requests.get(f'https://api.onesignal.com/apps/{_ONESIGNAL_APP_ID}/subscriptions/{onesignal_id}/user/identity', headers=headers)
-        status_code = r.status_code
-        logger.info("Tautulli MobileApp :: OneSignal ID validation returned status code %s", status_code)
-        return int(status_code == 200)
-    except Exception as e:
-        logger.warn("Tautulli MobileApp :: Failed to validate OneSignal ID: %s." % e)
-        return -1
 
 
 def validate_push_token(push_token):
@@ -287,9 +273,7 @@ def validate_push_token(push_token):
 
 
 def validates_remotely(device):
-    if device['push_token']:
-        return device['push_token'] != _PUSH_DISABLED
-    return bool(device['onesignal_id']) and device['onesignal_id'] != _ONESIGNAL_DISABLED
+    return bool(device['push_token']) and device['push_token'] != _PUSH_DISABLED
 
 
 def revalidate_devices():
@@ -308,7 +292,7 @@ def _revalidate_devices():
     logger.info("Tautulli MobileApp :: Validating %s mobile device registration(s).", len(devices))
 
     for device in devices:
-        set_official(device['device_id'], device['onesignal_id'], device['push_token'])
+        set_official(device['device_id'], device['push_token'])
         time.sleep(_REVALIDATE_INTERVAL)
 
 

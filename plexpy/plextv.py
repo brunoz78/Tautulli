@@ -117,8 +117,13 @@ def get_server_resources(return_presence=False, return_server=False, return_info
 
 
 def notify_token_expired():
-    if PlexTV().check_token() is False:
+    token = plexpy.CONFIG.PMS_TOKEN
+    token_valid = PlexTV().check_token()
+    if token_valid is False:
+        plexpy.PLEXTV_BAD_TOKEN = token
         plexpy.NOTIFY_QUEUE.put({'notify_action': 'on_tokenexpired'})
+    elif token_valid:
+        plexpy.PLEXTV_BAD_TOKEN = None
 
 
 class PlexTV(object):
@@ -201,7 +206,7 @@ class PlexTV(object):
                            }
                     return pin
                 else:
-                    logger.warn("Tautulli PlexTV :: Could not get Plex authentication pin.")
+                    logger.error("Tautulli PlexTV :: Could not get Plex authentication pin.")
                     return None
 
             except Exception as e:
@@ -326,7 +331,8 @@ class PlexTV(object):
         request = self.request_handler.make_request(uri=uri,
                                                     request_type='GET',
                                                     return_response=return_response,
-                                                    output_format=output_format)
+                                                    output_format=output_format,
+                                                    raise_errors=False)
         return request
 
     def get_full_users_list(self):
@@ -930,4 +936,7 @@ class PlexTV(object):
     def check_token(self):
         response = self.ping_plextv(return_response=True)
         if response is not None:
-            return response.status_code != 401
+            if response.status_code == 401:
+                return False
+            if 200 <= response.status_code < 300:
+                return True

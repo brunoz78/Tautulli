@@ -144,24 +144,6 @@
                             </label>
                             <p class="help-block">Enable if you want Tautulli to calculate the total file size for TV Shows/Seasons and Artists/Albums on the media info tables.</p>
                         </div>
-                        <div class="checkbox advanced-setting">
-                            <label>
-                                <input type="checkbox" id="log_blacklist" name="log_blacklist" value="1" ${config['log_blacklist']}> Mask Sensitive Information in Logs
-                            </label>
-                            <p class="help-block">
-                                Enable to mask passwords, access tokens, and public IP addresses, and email addresses with asterisks (*) in the logs.<br />
-                                Note: Only logs from the time this setting is enabled will be masked. Do not post your logs publically without masking sensitive information!
-                            </p>
-                        </div>
-                        <div class="checkbox advanced-setting">
-                            <label>
-                                <input type="checkbox" id="log_blacklist_usernames" name="log_blacklist_usernames" value="1" ${config['log_blacklist_usernames']}> Mask Usernames in Logs
-                            </label>
-                            <p class="help-block">
-                                Enable to mask Plex usernames with asterisks (*) in the logs.<br />
-                                Note: Only logs from the time this setting is enabled will be masked.
-                            </p>
-                        </div>
 
                         <div class="padded-header">
                             <h3>History Logging</h3>
@@ -278,7 +260,7 @@
                                     The interval (in hours) Tautulli will check for a new update. Minimum 1, default 6.
                                 </p>
                             </div>
-                            % if not plexpy.SNAP and not plexpy.FROZEN:
+                            % if not plexpy.SNAP and not plexpy.FLATPAK and not plexpy.FROZEN:
                             <div class="checkbox">
                                 <label>
                                     <input type="checkbox" id="plexpy_auto_update" name="plexpy_auto_update" value="1" ${config['plexpy_auto_update']} ${docker_setting}> Update Automatically ${docker_msg | n}
@@ -361,9 +343,41 @@
                         % endif
 
                         <div class="padded-header advanced-setting">
-                            <h3>System Analytics</h3>
+                            <h3>System</h3>
                         </div>
 
+                        <div class="checkbox advanced-setting">
+                            <label>
+                                <input type="checkbox" id="verbose_logs" name="verbose_logs" value="1" ${config['verbose_logs']}> Enable Debug Logging
+                            </label>
+                            <p class="help-block">Write debug messages to the Tautulli log. Turn this on when you send logs for support.</p>
+                        </div>
+                        <div class="checkbox advanced-setting">
+                            <label>
+                                <input type="checkbox" id="log_blacklist" name="log_blacklist" value="1" ${config['log_blacklist']}> Mask Sensitive Information in Logs
+                            </label>
+                            <p class="help-block">
+                                Enable to mask passwords, access tokens, and public IP addresses, and email addresses with asterisks (*) in the logs.<br />
+                                Note: Only logs from the time this setting is enabled will be masked. Do not post your logs publically without masking sensitive information!
+                            </p>
+                        </div>
+                        <div class="checkbox advanced-setting">
+                            <label>
+                                <input type="checkbox" id="log_blacklist_usernames" name="log_blacklist_usernames" value="1" ${config['log_blacklist_usernames']}> Mask Usernames in Logs
+                            </label>
+                            <p class="help-block">
+                                Enable to mask Plex usernames with asterisks (*) in the logs.<br />
+                                Note: Only logs from the time this setting is enabled will be masked.
+                            </p>
+                        </div>
+                        <div class="checkbox advanced-setting">
+                            <label>
+                                <input type="checkbox" id="log_login_ip" name="log_login_ip" value="1" ${config['log_login_ip']}> Unmask IP Addresses in Logs for Failed Logins
+                            </label>
+                            <p class="help-block">
+                                Unmask IP addresses for failed login attempts in the logs (e.g. for use with fail2ban). Only applies when Mask Sensitive Information in Logs is also enabled.
+                            </p>
+                        </div>
                         <div class="checkbox advanced-setting">
                             <label>
                                 <input type="checkbox" id="system_analytics" name="system_analytics" value="1" ${config['system_analytics']}> Send Anonymous System Analytics
@@ -711,32 +725,38 @@
 
                         <p class="help-block">Note: Authentication changes require a restart.</p>
                         <div class="form-group">
-                            <label for="http_username">HTTP Username</label>
+                            <label for="http_username">Admin Username</label>
                             <div class="row">
                                 <div class="col-md-4">
                                     <input type="text" class="form-control auth-settings" id="http_username" name="http_username" value="${config['http_username']}" size="30">
                                 </div>
                             </div>
-                            <p class="help-block">Username for web server authentication. Leave empty to disable.</p>
+                            <p class="help-block">Your Tautulli admin username. Leave empty to disable.</p>
                         </div>
                         <div class="form-group">
-                            <label for="http_password">HTTP Password</label>
+                            <label for="http_password">Admin Password</label>
                             <div class="row">
                                 <div class="col-md-4">
                                     <input type="password" class="form-control auth-settings" id="http_password" name="http_password" value="${config['http_password']}" size="30" autocomplete="new-password">
                                 </div>
                             </div>
-                            <p class="help-block">Password for web server authentication. Leave empty to disable.</p>
+                            <p class="help-block">Your Tautulli admin password. Leave empty to disable.</p>
                         </div>
 
                         <input type="checkbox" name="auth_changed" id="auth_changed" value="1" style="display: none;">
 
                         <div class="checkbox">
                             <label>
-                                <input type="checkbox" class="auth-settings" name="http_plex_admin" id="http_plex_admin" value="1" ${config['http_plex_admin']} data-parsley-trigger="change"> Allow Plex Admin
+                                <input type="checkbox" class="auth-settings" name="http_plex_admin" id="http_plex_admin" value="1" ${config['http_plex_admin']} data-parsley-trigger="change"> Allow Plex Admin Login
                             </label>
                             <span id="allowPlexCheck" class="settings-warning"></span>
                             <p class="help-block">Allow the Plex server admin to login as a Tautulli admin using their Plex.tv account.</p>
+                        </div>
+                        <div class="checkbox">
+                            <label>
+                                <input type="checkbox" id="allow_tautulli_login" name="allow_tautulli_login" value="1" ${config['allow_tautulli_login']}> Allow Tautulli Login
+                            </label>
+                            <p class="help-block">Allow the Tautulli admin to login using the username and password. If unchecked, only Sign In with Plex works and Allow Plex Admin Login must be enabled.</p>
                         </div>
                         <div class="checkbox">
                             <label>
@@ -976,6 +996,12 @@
                                 <input type="checkbox" id="refresh_users_on_startup" name="refresh_users_on_startup" value="1" ${config['refresh_users_on_startup']}> Refresh Users List on Startup
                             </label>
                             <p class="help-block">Refresh the users list when Tautulli starts.</p>
+                        </div>
+                        <div class="checkbox advanced-setting">
+                            <label>
+                                <input type="checkbox" id="auto_unarchive_users" name="auto_unarchive_users" value="1" ${config['auto_unarchive_users']}> Automatically Unarchive Returning Users
+                            </label>
+                            <p class="help-block">Unarchive an archived user when they regain access to the Plex server. Users which never lost access stay archived.</p>
                         </div>
 
                         <div class="form-group advanced-setting">
@@ -1476,24 +1502,22 @@
 
                         <div class="form-group">
                             <label for="database_import">Database Import</label>
-                            <p class="help-block">Click a button below to import an existing database from the selected app.</p>
+                            <p class="help-block">Click a button below to import an existing Tautulli database.</p>
                             <div class="row">
                                 <div class="col-md-9">
                                     <div class="btn-group">
-                                        <button class="btn btn-form toggle-app-import-modal" type="button" data-target="#app-import-modal" data-toggle="modal" data-app="tautulli">Tautulli</button>
-                                        <button class="btn btn-form toggle-app-import-modal" type="button" data-target="#app-import-modal" data-toggle="modal" data-app="plexwatch">PlexWatch</button>
-                                        <button class="btn btn-form toggle-app-import-modal" type="button" data-target="#app-import-modal" data-toggle="modal" data-app="plexivity">Plexivity</button>
+                                        <button class="btn btn-form toggle-app-import-modal" type="button" data-target="#app-import-modal" data-toggle="modal">Import Database</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="form-group">
                             <label for="config_import">Configuration Import</label>
-                            <p class="help-block">Click the button below to import a previous Tautulli configuration.</p>
+                            <p class="help-block">Click the button below to import an existing Tautulli configuration.</p>
                             <div class="row">
                                 <div class="col-md-9">
                                     <div class="btn-group">
-                                        <button class="btn btn-form toggle-config-import-modal" type="button" data-target="#config-import-modal" data-toggle="modal">Tautulli</button>
+                                        <button class="btn btn-form toggle-config-import-modal" type="button" data-target="#config-import-modal" data-toggle="modal">Import Configuration</button>
                                     </div>
                                 </div>
                             </div>
@@ -1555,7 +1579,7 @@
                                         </span>
                                     </div>
                                     <div class="btn-group">
-                                        <button class="btn btn-form" type="button" id="backup_config">Backup Config</button>
+                                        <button class="btn btn-form" type="button" id="backup_config">Backup Configuration</button>
                                         <button class="btn btn-form" type="button" id="backup_database">Backup Database</button>
                                     </div>
                                 </div>
@@ -1648,10 +1672,6 @@
             </form>
         </div>
     </div>
-</div>
-<div id="token_error_bar" style="display: none;">
-    <i class="fa fa-exclamation-triangle"></i> Your Plex.tv token is no longer valid.<br>
-    Please <a data-tab-destination="plex_media_server" data-target="sign-in-plex">fetch a new token</a>.
 </div>
 </%def>
 
@@ -1856,7 +1876,7 @@
                             They <em>do not</em> separate the notification parameters (i.e. <span class="inline-pre">{show_name}</span> vs. <span class="inline-pre">{episode_name}</span>.
                         </p>
                         <p class="help-block">
-                            Note: Nesting tags inside each other is not supported.
+                            Note: Nesting tags inside each other is not supported, except the live TV tag which can go inside or around the other media type tags.
                         </p>
                     </div>
                     <div>
@@ -1881,13 +1901,24 @@
                     <div>
                         <h4>Artist / Album / Track Tag</h4>
                     </div>
-                    <div>
+                    <div style="padding-bottom: 10px;">
                         <p class="help-block">
                             All text inside <span class="inline-pre">&lt;artist&gt;&lt;/artist&gt;</span>/<span class="inline-pre">&lt;album&gt;&lt;/album&gt;</span>/<span class="inline-pre">&lt;track&gt;&lt;/track&gt;</span>
                             tags will only be sent when the media type is artist, album, or track, respectively.
                         </p>
                         <p><strong style="color: #fff;">Example:</strong></p>
                         <pre>{artist_name}&lt;album&gt; - {album_name}&lt;/album&gt;&lt;track&gt; - {album_name} - {track_name}&lt;/track&gt; was recently added to Plex.</pre>
+                    </div>
+                    <div>
+                        <h4>Live TV Tag</h4>
+                    </div>
+                    <div>
+                        <p class="help-block">
+                            All text inside <span class="inline-pre">&lt;live&gt;&lt;/live&gt;</span> tags will only be sent when the stream is Live TV.
+                            A Live TV movie or episode keeps the text inside both its media type tag and the <span class="inline-pre">&lt;live&gt;&lt;/live&gt;</span> tag.
+                        </p>
+                        <p><strong style="color: #fff;">Example:</strong></p>
+                        <pre>{user} started playing {title}&lt;live&gt; on {channel_title}&lt;/live&gt;.</pre>
                     </div>
                 </div>
             </div>
@@ -2426,7 +2457,7 @@ $(document).ready(function() {
         $('#confirm-message').text("Are you sure you want to shutdown Tautulli?");
         $('#confirm-modal').modal();
         $('#confirm-modal').one('click', '#confirm-button', function () {
-            window.location.href = 'shutdown';
+            postAndShowPage('shutdown');
         });
     });
 
@@ -2434,7 +2465,7 @@ $(document).ready(function() {
         $("#confirm-message").text("Are you sure you want to restart Tautulli?");
         $('#confirm-modal').modal();
         $('#confirm-modal').one('click', '#confirm-button', function () {
-            window.location.href = 'restart';
+            postAndShowPage('restart');
         });
     });
 
@@ -2447,7 +2478,7 @@ $(document).ready(function() {
     });
 
     $('#modal_link_restart').click(function() {
-        window.location.href = 'restart';
+        postAndShowPage('restart');
     });
 
     $('#menu_link_show_advanced_settings').click(function() {
@@ -2545,7 +2576,7 @@ $(document).ready(function() {
             $('#confirm-modal').modal();
             $('#confirm-modal').one('click', '#confirm-button', function () {
                 settingsChanged = false;
-                window.location.href = 'checkout_git_branch?git_remote=' + new_remote + '&git_branch=' + new_branch;
+                postAndShowPage('checkout_git_branch', {git_remote: new_remote, git_branch: new_branch});
             });
         }
     });
@@ -2557,7 +2588,7 @@ $(document).ready(function() {
         $('#confirm-modal').modal();
         $('#confirm-modal').one('click', '#confirm-button', function () {
             settingsChanged = false;
-            window.location.href = 'reset_git_install';
+            postAndShowPage('reset_git_install');
         });
     });
 
@@ -2817,7 +2848,6 @@ $(document).ready(function() {
     $(".toggle-app-import-modal").click(function() {
         $.ajax({
             url: 'import_database_tool',
-            data: { app: $(this).data('app') },
             cache: false,
             async: true,
             complete: function(xhr, status) {
@@ -2906,7 +2936,7 @@ $(document).ready(function() {
 
     $.ajax({
         url: 'get_library_sections',
-        data: { },
+        data: { include_archived: 1 },  // Always include archived libraries
         async: true,
         complete: function (data) {
             libraries_list = $.parseJSON(data.responseText);
@@ -2920,6 +2950,7 @@ $(document).ready(function() {
                         '<label>' + 
                             '<input type="checkbox" id="hlcard-' + key + '" name="hlcard-' + key + '" value="' + key + '"> ' + title + 
                         '</label>' + 
+                        (libraries_list[i].is_archived ? '<span class="pull-right" title="Archived library"><i class="fa fa-archive"></i></span>' : '') +
                     '</li>'
                 );
             }
@@ -2969,6 +3000,32 @@ $(document).ready(function() {
 
     $('#http_username, #http_password').change(function () {
         allowGuestAccessCheck();
+    });
+
+    function allowTautulliLoginCheck() {
+        if ($('#http_plex_admin').is(':checked')) {
+            $("#allow_tautulli_login").attr("disabled", false);
+        } else {
+            $("#allow_tautulli_login").attr("checked", false).attr("disabled", true);
+        }
+    }
+    allowTautulliLoginCheck();
+
+    $('#http_plex_admin').change(function () {
+        allowTautulliLoginCheck();
+    });
+
+    function unmaskLoginIPCheck() {
+        if ($('#log_blacklist').is(':checked')) {
+            $("#log_login_ip").attr("disabled", false);
+        } else {
+            $("#log_login_ip").attr("checked", false).attr("disabled", true);
+        }
+    }
+    unmaskLoginIPCheck();
+
+    $('#log_blacklist').change(function () {
+        unmaskLoginIPCheck();
     });
 
     // Load PMS downloads

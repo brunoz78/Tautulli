@@ -64,21 +64,24 @@ def plex_user_login(token=None, headers=None):
 
     if user_token and user_id:
         # Try to retrieve the user from the database.
-        # Also make sure guest access is enabled for the user and the user is not deleted.
+        # Also make sure guest access is enabled for the user and the user is not deleted or archived.
         user_data = Users()
         user_details = user_data.get_details(user_id=user_id)
         if user_id != str(user_details['user_id']):
             # The user is not in the database.
+            logger.warn("Tautulli WebAuth :: Plex user '%s' is not a Tautulli user." % plex_user['username'])
             return None
         elif plexpy.CONFIG.HTTP_PLEX_ADMIN and user_details['is_admin']:
             # Plex admin login
             return user_details, 'admin'
-        elif not user_details['allow_guest'] or user_details['deleted_user']:
-            # Guest access is disabled or the user is deleted.
+        elif not user_details['allow_guest'] or user_details['deleted_user'] or user_details['is_archived']:
+            # Guest access is disabled or the user is deleted or archived.
+            logger.warn("Tautulli WebAuth :: Guest access is not allowed for user '%s'." % user_details['username'])
             return None
 
         # Stop here if guest access is not enabled
         if not plexpy.CONFIG.ALLOW_GUEST_ACCESS:
+            logger.warn("Tautulli WebAuth :: Guest access is disabled. User '%s' cannot log in." % user_details['username'])
             return None
 
         # The user is in the database, and guest access is enabled, so try to retrieve a server token.
@@ -105,8 +108,8 @@ def plex_user_login(token=None, headers=None):
                                 % user_details['username'])
                     return None
             except Exception as e:
-                logger.warn("Tautulli WebAuth :: Unable to register user '%s' in database: %s."
-                            % (user_details['username'], e))
+                logger.exception("Tautulli WebAuth :: Unable to register user '%s' in database: %s."
+                                 % (user_details['username'], e))
                 return None
         else:
             logger.warn("Tautulli WebAuth :: Unable to retrieve Plex.tv server token for user '%s'."
@@ -118,11 +121,18 @@ def plex_user_login(token=None, headers=None):
         return None
 
 
+def tautulli_login_disabled():
+    """Return True when Allow Tautulli Login is off, Allow Plex Admin is on and the setup wizard is done."""
+    return bool(not plexpy.CONFIG.ALLOW_TAUTULLI_LOGIN
+                and plexpy.CONFIG.HTTP_PLEX_ADMIN
+                and plexpy.CONFIG.FIRST_RUN_COMPLETE)
+
+
 def check_credentials(username=None, password=None, token=None, admin_login='0', headers=None):
     """Verifies credentials for username and password.
     Returns True and the user group on success or False and no user group"""
 
-    if username and password:
+    if username and password and not tautulli_login_disabled():
         if plexpy.CONFIG.HTTP_PASSWORD:
             user_details = {'user_id': None, 'username': username}
             if username == plexpy.CONFIG.HTTP_USERNAME and check_hash(password, plexpy.CONFIG.HTTP_PASSWORD):
@@ -275,7 +285,11 @@ def check_csrf_token():
     if cherrypy.request.path_info.startswith('/api'):
         return
 
-    if (apikey := cherrypy.request.headers.get('X-Api-Key')) and compare_digest(apikey, plexpy.CONFIG.API_KEY):
+    if (
+        cherrypy.request.path_info.startswith('/auth/signin')
+        and (apikey := cherrypy.request.headers.get('X-Api-Key'))
+        and compare_digest(apikey, plexpy.CONFIG.API_KEY)
+    ):
         return
 
     if cherrypy.request.method not in ('POST', 'PUT', 'DELETE'):
@@ -318,8 +332,8 @@ class AuthController(object):
 
         if success:
             use_oauth = 'Plex OAuth' if oauth else 'form'
-            logger.debug("Tautulli WebAuth :: %s user '%s' logged into Tautulli using %s login."
-                         % (user_group.capitalize(), username, use_oauth))
+            logger.info("Tautulli WebAuth :: %s user '%s' logged into Tautulli using %s login."
+                        % (user_group.capitalize(), username, use_oauth))
 
     def on_logout(self, username, user_group, jwt_token=None):
         """Called on logout"""
@@ -327,7 +341,7 @@ class AuthController(object):
         if jwt_token:
             Users().clear_user_login_token(jwt_token=jwt_token)
 
-        logger.debug("Tautulli WebAuth :: %s user '%s' logged out of Tautulli." % (user_group.capitalize(), username))
+        logger.info("Tautulli WebAuth :: %s user '%s' logged out of Tautulli." % (user_group.capitalize(), username))
 
     def get_loginform(self, redirect_uri=''):
         from plexpy.webserve import serve_template
@@ -382,7 +396,8 @@ class AuthController(object):
         rate_limit = check_rate_limit(ip_address)
 
         if rate_limit:
-            logger.debug("Tautulli WebAuth :: Too many incorrect login attempts from '%s'." % ip_address)
+            logger.debug("Tautulli WebAuth :: Too many incorrect login attempts from '%s'." % ip_address,
+                         extra={'keep_ip': bool(plexpy.CONFIG.LOG_LOGIN_IP)})
             error_message = {'status': 'error', 'message': 'Too many login attempts.'}
             cherrypy.response.status = 429
             cherrypy.response.headers['Retry-After'] = rate_limit
@@ -431,21 +446,19 @@ class AuthController(object):
             cherrypy.response.status = 200
             return {'status': 'success', 'token': jwt_token, 'uuid': hash_pms_uuid()}
 
-        elif admin_login == '1' and username:
-            self.on_login(username=username)
-            logger.debug("Tautulli WebAuth :: Invalid admin login attempt from '%s'." % username)
-            cherrypy.response.status = 401
-            return error_message
-
-        elif username:
-            self.on_login(username=username)
-            logger.debug("Tautulli WebAuth :: Invalid user login attempt from '%s'." % username)
-            cherrypy.response.status = 401
-            return error_message
-
         elif token:
             self.on_login(username='Plex OAuth', oauth=True)
-            logger.debug("Tautulli WebAuth :: Invalid Plex OAuth login attempt.")
+            logger.warn("Tautulli WebAuth :: Invalid Plex OAuth login attempt from IP '%s'." % ip_address,
+                        extra={'keep_ip': bool(plexpy.CONFIG.LOG_LOGIN_IP)})
+            cherrypy.response.status = 401
+            return error_message
+
+        else:
+            username = username or ''
+            self.on_login(username=username)
+            login_type = 'admin' if admin_login == '1' else 'user'
+            logger.warn("Tautulli WebAuth :: Invalid %s login attempt from %r at IP '%s'." % (login_type, username, ip_address),
+                        extra={'keep_ip': bool(plexpy.CONFIG.LOG_LOGIN_IP)})
             cherrypy.response.status = 401
             return error_message
 

@@ -105,9 +105,9 @@ history_table_options = {
             "data": "ip_address",
             "createdCell": function (td, cellData, rowData, row, col) {
                 if (cellData) {
-                    isPrivateIP(cellData).then(function () {
+                    isPrivateIP(cellData).done(function () {
                         $(td).html('<a href="javascript:void(0)" data-toggle="modal" data-target="#ip-info-modal">'+ cellData + '</a>');
-                    }, function () {
+                    }).fail(function () {
                         external_ip = '<span class="external-ip-tooltip" data-toggle="tooltip" title="External IP"><i class="fa fa-map-marker fa-fw"></i></span>';
                         $(td).html('<a href="javascript:void(0)" data-toggle="modal" data-target="#ip-info-modal">'+ external_ip + cellData + '</a>');
                     });
@@ -163,7 +163,7 @@ history_table_options = {
             "targets": [7],
             "data": "full_title",
             "createdCell": function (td, cellData, rowData, row, col) {
-                if (cellData !== '') {
+                if (cellData) {
                     var icon = '';
                     var icon_title = '';
                     var parent_info = '';
@@ -277,7 +277,7 @@ history_table_options = {
             },
             "searchable": false,
             "orderable": false,
-            "className": "no-wrap",
+            "className": "no-wrap watched-status",
             "width": "2%"
         },
     ],
@@ -357,6 +357,14 @@ history_table_options = {
 
         if (rowData['state'] !== null) {
             $(row).addClass('current-activity-row');
+        }
+
+        if (rowData['user_is_archived']) {
+            $(row).addClass('archived-user');
+        }
+
+        if (rowData['library_is_archived']) {
+            $(row).addClass('archived-library');
         }
     }
 };
@@ -479,7 +487,9 @@ function childTableOptions(rowData) {
             return {
                 json_data: JSON.stringify(d),
                 grouping: false,
-                reference_id: rowData['reference_id']
+                reference_id: rowData['reference_id'],
+                // The parent row is already shown, so show its plays even if the user is archived
+                include_archived: 1
             };
         },
         error: function(xhr, error, thrown) {

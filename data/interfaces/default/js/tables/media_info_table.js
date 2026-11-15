@@ -286,6 +286,7 @@ media_info_table_options = {
             $('#refresh-media-info-table').prop('disabled', true);
             $.ajax({
                 url: 'get_media_info_file_sizes',
+                type: 'post',
                 async: true,
                 data: { section_id: section_id },
                 complete: function (xhr, status) {
@@ -374,7 +375,8 @@ function childTableOptionsMedia(rowData) {
                 section_id: rowData['section_id'],
                 section_type: section_type,
                 rating_key: rowData['rating_key'],
-                refresh: refresh_child_tables
+                refresh: refresh_child_tables,
+                include_archived: include_archived
             };
         },
         error: function(xhr, error, thrown) {
@@ -415,6 +417,7 @@ function childTableOptionsMedia(rowData) {
             $('#refresh-media-info-table').prop('disabled', true);
             $.ajax({
                 url: 'get_media_info_file_sizes',
+                type: 'post',
                 async: true,
                 data: {
                     section_id: section_id,
