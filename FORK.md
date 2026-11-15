@@ -31,7 +31,7 @@ Fehlersuche im Browser: `localStorage.tautulli_i18n_debug = "1"`, Seite neu lade
 
 ## Abgleich mit dem Original
 
-`.github/workflows/fork-sync.yml` läuft montags: Es übernimmt das neueste offizielle Release des
+`.github/workflows/fork-sync.yml` läuft in der Nacht von Freitag auf Samstag: Es übernimmt das neueste offizielle Release des
 Originals, übersetzt neue Texte (Secret `ANTHROPIC_API_KEY`, sonst ein Issue), prüft den Start
 und veröffentlicht ein Release `v<Version>.post<Datum>`. Bei einem Merge-Konflikt entsteht ein
 Issue. Ändert das Original Workflow-Dateien, braucht der Push das Secret `SYNC_TOKEN`

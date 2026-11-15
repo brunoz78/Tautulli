@@ -27,8 +27,8 @@ Ansonsten ist es das Original: Jedes offizielle Release von Tautulli wird automa
   Ausgabe aus diesem Fork und startet Tautulli neu.
 - **Proxmox-Container:** ein Script legt einen Debian-13-Container an und installiert Tautulli
   als Dienst, ohne Docker.
-- **Aktuell ohne Aufwand:** Jeden Montag prüft ein Workflow, ob das Original ein neues Release
-  hat. Wenn ja, wird es eingespielt und als neues Release `<Version>.post<Datum>` veröffentlicht.
+- **Aktuell ohne Aufwand:** Jede Woche in der Nacht von Freitag auf Samstag prüft ein Workflow,
+  ob das Original ein neues Release hat. Wenn ja, wird es eingespielt und als neues Release `<Version>.post<Datum>` veröffentlicht.
   Bringt es neue englische Texte mit, erscheinen sie als Issue in diesem Fork und werden
   nachübersetzt.
 

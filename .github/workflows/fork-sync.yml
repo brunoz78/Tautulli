@@ -1,4 +1,4 @@
-# Weekly: merge the latest release of Tautulli/Tautulli, translate new UI strings, publish a release.
+# Weekly (night Friday to Saturday): merge the latest release of Tautulli/Tautulli, translate new UI strings, publish a release.
 # Fork addition; the workflows of the original project are disabled in this fork.
 #
 # The built-in updater of Tautulli follows the head of the master branch, so master
@@ -7,7 +7,7 @@ name: Fork sync and release
 
 on:
   schedule:
-    - cron: "0 3 * * 1"   # Monday 03:00 UTC
+    - cron: "0 1 * * 6"   # Saturday 01:00 UTC (night Friday to Saturday)
   workflow_dispatch:
     inputs:
       force_release:
