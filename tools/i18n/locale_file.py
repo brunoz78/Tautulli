@@ -29,10 +29,12 @@ def load(lang: str) -> dict[str, str]:
 
 
 def save(lang: str, strings: dict[str, str]) -> None:
-    # "rules" (regular expressions for numbers) and "locale" (settings for moment
-    # and Highcharts) are maintained by hand
+    # "rules" (regular expressions for numbers), "contextual" (words translated only
+    # next to a known link) and "locale" (settings for moment and Highcharts) are
+    # maintained by hand
     old = _load_all(lang)
     data = {"lang": lang, "locale": old.get("locale") or {}, "rules": old.get("rules") or [],
+            "contextual": old.get("contextual") or [],
             "strings": dict(sorted(strings.items(), key=lambda kv: (kv[0].lower(), kv[0])))}
     text = HEADER.format(lang=lang, name=NAMES.get(lang, lang)) + "window.TAUTULLI_I18N_DICT = " \
         + json.dumps(data, ensure_ascii=False, indent=1) + ";\n"

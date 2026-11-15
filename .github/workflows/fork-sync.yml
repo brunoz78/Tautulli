@@ -80,33 +80,46 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          TAG="${{ steps.merge.outputs.tag }}"
           MISSING=$(python tools/i18n/extract.py --missing de 2>&1 >/dev/null | grep -o '^[0-9]*')
           echo "Missing translations: $MISSING"
-          if [ "$MISSING" != "0" ]; then
-            if [ -n "$ANTHROPIC_API_KEY" ]; then
-              pip install --quiet anthropic
-              python tools/i18n/translate.py de
-            else
-              # Without an API key the strings are translated by hand. The issue is assigned
-              # to the owner so GitHub sends a mail; an open issue is updated, not duplicated.
-              python tools/i18n/extract.py --missing de > missing.txt 2>/dev/null
-              {
-                echo "Der Abgleich mit Tautulli/Tautulli ${{ steps.merge.outputs.tag }} hat $MISSING neue Texte gebracht, die noch nicht übersetzt sind. Sie erscheinen in der Oberfläche auf Englisch, bis sie in \`js/i18n/de.js\` ergänzt sind."
-                echo
-                echo "Erledigen: in einer Claude-Sitzung «Tautulli übersetzen» sagen, oder \`python tools/i18n/translate.py de\` mit ANTHROPIC_API_KEY."
-                echo
-                echo '```'
-                head -c 60000 missing.txt
-                echo '```'
-              } > issue.md
-              OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Übersetzung in:title" --json number -q '.[0].number')
-              if [ -n "$OPEN" ]; then
-                gh issue edit "$OPEN" --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" --body-file issue.md || true
-                gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Neuer Stand nach dem Abgleich: $MISSING Texte offen." || true
-              else
-                gh issue create --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" \
-                  --assignee "${{ github.repository_owner }}" --body-file issue.md || true
+          if [ "$MISSING" != "0" ] && [ -n "$ANTHROPIC_API_KEY" ]; then
+            pip install --quiet anthropic
+            python tools/i18n/translate.py de
+            MISSING=$(python tools/i18n/extract.py --missing de 2>&1 >/dev/null | grep -o '^[0-9]*')
+          fi
+          # The release notes (CHANGELOG.de.md) are always translated by hand.
+          NOTES_MISSING=$(python tools/i18n/changelog.py missing "$TAG" de)
+          echo "Release notes for $TAG missing in German: ${NOTES_MISSING:-no}"
+          if [ "$MISSING" != "0" ] || [ -n "$NOTES_MISSING" ]; then
+            # The issue is assigned to the owner so GitHub sends a mail;
+            # an open issue is updated, not duplicated.
+            TITLE="Übersetzung offen: $TAG"
+            {
+              echo "Der Abgleich mit Tautulli/Tautulli $TAG ist eingespielt. Noch nicht übersetzt:"
+              echo
+              if [ "$MISSING" != "0" ]; then
+                echo "- **$MISSING Texte der Oberfläche** (erscheinen auf Englisch, bis sie in \`js/i18n/de.js\` stehen)"
               fi
+              if [ -n "$NOTES_MISSING" ]; then
+                echo "- **Release-Notizen von $TAG** (Tautulli und das Release auf GitHub zeigen bis dahin die englischen; Abschnitt in \`CHANGELOG.de.md\` ergänzen)"
+              fi
+              echo
+              echo "Erledigen: in einer Claude-Sitzung «Tautulli übersetzen» sagen."
+              if [ "$MISSING" != "0" ]; then
+                echo
+                echo '```'
+                python tools/i18n/extract.py --missing de 2>/dev/null | head -c 60000
+                echo '```'
+              fi
+            } > issue.md
+            OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Übersetzung in:title" --json number -q '.[0].number')
+            if [ -n "$OPEN" ]; then
+              gh issue edit "$OPEN" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file issue.md || true
+              gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Neuer Stand nach dem Abgleich mit $TAG." || true
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+                --assignee "${{ github.repository_owner }}" --body-file issue.md || true
             fi
           fi
           python tools/i18n/extract.py
@@ -162,17 +175,33 @@ jobs:
         run: |
           TAG="${UPTAG}.post$(date -u +%Y%m%d%H%M)"
           SINCE=${LAST:+^$LAST}
+          PREV=${LAST%%.post*}
           {
             echo "Stand: Original Tautulli/Tautulli $UPTAG mit deutscher Oberfläche."
             echo
             echo "**Aktualisieren:** In Tautulli unter Einstellungen → «Nach Updates suchen», oder \`update\` in der Konsole des Containers."
-            if [ -n "$LAST" ]; then
+            echo
+            if [ -n "$PREV" ] && [ "$PREV" = "$UPTAG" ]; then
+              echo "## Neu im Original"
               echo
-              echo "### Neu im Original (bis $UPTAG)"
-              git log --no-merges --format='- %s ([%h](https://github.com/Tautulli/Tautulli/commit/%H))' "upstream-$UPTAG" $SINCE | head -80
+              echo "Keine neue Version des Originals, nur Änderungen am Fork."
+            else
+              echo "## Neu im Original (${PREV:+$PREV → }$UPTAG)"
+              echo
+              # German sections from CHANGELOG.de.md, or the English ones until they are translated
+              if [ -n "$(python tools/i18n/changelog.py missing "$UPTAG" de)" ]; then
+                echo "_Die deutsche Übersetzung folgt, bis dahin die englischen Release-Notizen._"
+                echo
+              fi
+              python tools/i18n/changelog.py notes "$UPTAG" ${PREV:+--since "$PREV"} --lang de
+              if [ -n "$PREV" ]; then
+                echo
+                echo "[Alle Änderungen im Code](https://github.com/Tautulli/Tautulli/compare/$PREV...$UPTAG)"
+              fi
             fi
             echo
-            echo "### Neu im Fork"
+            echo "## Neu im Fork"
+            echo
             git log --no-merges --format='- %s' HEAD $SINCE ^"upstream-$UPTAG" | head -40
           } > notes.md
           git tag "$TAG"

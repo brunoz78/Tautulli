@@ -57,3 +57,32 @@ def test_dictionary_is_valid_json():
     src = locale_file.path_for("de").read_text(encoding="utf-8")
     data = json.loads(src[src.index("{", src.index("=")): src.rindex("}") + 1])
     assert data["lang"] == "de" and data["strings"] and data["locale"]["highcharts"]["months"][2] == "März"
+
+
+def _changelog(monkeypatch, lang, root=None):
+    monkeypatch.setattr(fork_addons, "_request_language", lambda: lang)
+    monkeypatch.setattr(fork_addons.plexpy, "PROG_DIR", root or ROOT)
+    if root:
+        monkeypatch.setattr(fork_addons, "_ROOT", root)
+    read = fork_addons._wrap_read_changelog(fork_addons.versioncheck.read_changelog)
+    return read(latest_only=True)
+
+
+def test_changelog_in_german_and_english(monkeypatch):
+    de = _changelog(monkeypatch, "de")
+    en = _changelog(monkeypatch, "en")
+    assert "Behoben" in de and "Fix:" not in de
+    assert "Fix:" in en and "Behoben" not in en
+
+
+def test_german_changelog_covers_latest_release():
+    english = os.path.join(ROOT, "CHANGELOG.md")
+    german = fork_addons.changelog_path("de")
+    assert fork_addons.latest_version(german) == fork_addons.latest_version(english)
+
+
+def test_changelog_falls_back_to_english_when_translation_is_behind(monkeypatch, tmp_path):
+    (tmp_path / "CHANGELOG.md").write_text("# Changelog\n\n## v9.9.9 (2099-01-01)\n\n* Other:\n  * Fix: Something.\n", encoding="utf-8")
+    (tmp_path / "CHANGELOG.de.md").write_text("# Changelog\n\n## v9.9.8 (2098-01-01)\n\n* Sonstiges:\n  * Behoben: Etwas.\n", encoding="utf-8")
+    out = _changelog(monkeypatch, "de", root=str(tmp_path))
+    assert "v9.9.9" in out and "Behoben" not in out

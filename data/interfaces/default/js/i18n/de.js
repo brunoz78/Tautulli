@@ -96,6 +96,13 @@ window.TAUTULLI_I18N_DICT = {
    "$1 Staffeln"
   ]
  ],
+ "contextual": [
+  [
+   "A",
+   "^(new release|newer version|neue Version|neuere Version)",
+   "Eine"
+  ]
+ ],
  "strings": {
   "\" graph to start on Monday. Default is start on Sunday.": "» beginnt am Montag. Standard ist Sonntag.",
   "(Device ID: {0}{1})": "(Geräte-ID: {0}{1})",

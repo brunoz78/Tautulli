@@ -16,23 +16,30 @@ the original project touch a single line.
   (js/i18n/i18n.js) and the dictionary of the chosen language. The language
   comes from the tautulli_lang cookie, otherwise from TAUTULLI_UI_LANG,
   otherwise from the browser's Accept-Language header.
+- Release notes: with a German interface the changelog shown in Tautulli
+  comes from CHANGELOG.de.md, as long as it covers the latest release.
 - Updates: the built-in updater looks for new versions in this fork instead
   of the original repository.
 """
 
+import functools
+import io
 import os
 import re
+import types
 
 import cherrypy
 
 import plexpy
-from plexpy import logger, webserve
+from plexpy import logger, versioncheck, webserve
 
 SUPPORTED_LANGS = ('en', 'de')
 FORK_USER = 'brunoz78'
 FORK_REPO = 'Tautulli'
 
-_I18N_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'interfaces', 'default', 'js', 'i18n')
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+_I18N_DIR = os.path.join(_ROOT, 'data', 'interfaces', 'default', 'js', 'i18n')
+_CHANGELOG = 'CHANGELOG.md'
 _COOKIE_RE = re.compile(r'(?:^|;\s*)tautulli_lang=([a-z]{2})')
 _HEAD_RE = re.compile(r'<head(?:\s[^>]*)?>', re.IGNORECASE)
 _HTML_LANG_RE = re.compile(r'<html([^>]*?)\slang="[a-zA-Z-]*"', re.IGNORECASE)
@@ -82,20 +89,88 @@ def inject(html, lang):
                              html, count=1)
 
 
+def _request_language():
+    try:
+        headers = cherrypy.request.headers
+        return pick_language(headers.get('Cookie', ''), headers.get('Accept-Language', ''))
+    except Exception:
+        return 'en'
+
+
 def _wrap_serve_template(original):
     def serve_template(template_name, **kwargs):
         html = original(template_name, **kwargs)
         if template_name in _SKIP_TEMPLATES:
             return html
-        try:
-            headers = cherrypy.request.headers
-            lang = pick_language(headers.get('Cookie', ''), headers.get('Accept-Language', ''))
-        except Exception:
-            lang = 'en'
-        return inject(html, lang)
+        return inject(html, _request_language())
 
     serve_template.__wrapped__ = original
     return serve_template
+
+
+# ---- release notes ---------------------------------------------------------
+
+def changelog_path(lang):
+    """CHANGELOG.<lang>.md next to CHANGELOG.md, or None for English."""
+    return None if lang == 'en' else os.path.join(_ROOT, 'CHANGELOG.%s.md' % lang)
+
+
+def latest_version(path):
+    """Version of the first release section, e.g. 'v2.19.1'."""
+    try:
+        with io.open(path, encoding='utf-8') as f:
+            for line in f:
+                m = re.match(r'#{2,}\s+(v\S+)', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
+class _PathRedirect(object):
+    """os.path that answers CHANGELOG.md with another file."""
+
+    def __init__(self, target):
+        self._target = target
+
+    def join(self, *parts):
+        if parts and parts[-1] == _CHANGELOG:
+            return self._target
+        return os.path.join(*parts)
+
+    def __getattr__(self, name):
+        return getattr(os.path, name)
+
+
+class _OsRedirect(object):
+    def __init__(self, target):
+        self.path = _PathRedirect(target)
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+
+def _wrap_read_changelog(original):
+    def read_changelog(*args, **kwargs):
+        translated = changelog_path(_request_language())
+        english = os.path.join(_ROOT, _CHANGELOG)
+        # Only while the translation covers the latest release; otherwise the
+        # English notes are newer and better than an outdated German version.
+        if translated and os.path.isfile(translated) and latest_version(translated) == latest_version(english):
+            # Run the original code against the translated file; open() reads
+            # UTF-8 so umlauts also work on Windows.
+            env = dict(original.__globals__)
+            env['os'] = _OsRedirect(translated)
+            env['open'] = functools.partial(io.open, encoding='utf-8')
+            func = types.FunctionType(original.__code__, env, original.__name__,
+                                      original.__defaults__, original.__closure__)
+            func.__kwdefaults__ = original.__kwdefaults__
+            return func(*args, **kwargs)
+        return original(*args, **kwargs)
+
+    read_changelog.__wrapped__ = original
+    return read_changelog
 
 
 def _use_fork_updates():
@@ -109,4 +184,6 @@ def _use_fork_updates():
 def install():
     if not hasattr(webserve.serve_template, '__wrapped__'):
         webserve.serve_template = _wrap_serve_template(webserve.serve_template)
+    if not hasattr(versioncheck.read_changelog, '__wrapped__'):
+        versioncheck.read_changelog = _wrap_read_changelog(versioncheck.read_changelog)
     _use_fork_updates()

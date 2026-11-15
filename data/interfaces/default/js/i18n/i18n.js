@@ -152,13 +152,29 @@
     return !!(el.closest && el.closest(DATA_SELECTOR));
   }
 
+  // Words that are only translated next to a known link, e.g. the "A" in
+  // "A <a>new release (v2.19.1)</a> of Tautulli is available!". Standing alone
+  // they mean something else ("A" is also the AM/PM token in the date formats).
+  // Each entry: [text, regex for the following element's text, translation]
+  const contextual = ((dict && dict.contextual) || []).map(([k, re, out]) => [k, new RegExp(re), out]);
+
+  function translateInContext(node, v) {
+    const key = norm(v);
+    for (const [k, re, out] of contextual) {
+      if (key !== k) continue;
+      const next = node.nextSibling;
+      if (next && next.nodeType === 1 && re.test(norm(next.textContent || ""))) return out;
+    }
+    return null;
+  }
+
   function doText(node) {
     const v = node.data;
     if (done.get(node) === v) return;
     if (!v || v.length > 2000 || !/[A-Za-z]/.test(v)) return;
     const parent = node.parentNode;
     if (!parent || parent.nodeType !== 1 || skipped(parent)) return;
-    const tr = translate(v);
+    const tr = translateInContext(node, v) ?? translate(v);
     if (tr != null) {
       const nv = withSpace(v, tr);
       done.set(node, nv);
